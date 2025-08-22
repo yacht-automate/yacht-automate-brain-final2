@@ -18,12 +18,10 @@ export class YachtMatcher {
     const areas = this.mapLocationToAreas(location || '');
     
     // Get all yachts for tenant
-    let searchResult = this.db.searchYachts(tenantId, {
+    let yachts = this.db.searchYachts(tenantId, {
       guests: strictGuests ? partySize : undefined,
-      strictGuests: strictGuests
+      strictGuests: strictGuests ? 1 : 0
     });
-
-    let yachts = searchResult.items;
 
     // Filter by areas if specified
     if (areas.length > 0) {

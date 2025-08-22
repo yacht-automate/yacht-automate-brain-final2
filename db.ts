@@ -24,22 +24,17 @@ export class DatabaseService {
   }
 
   private initTables() {
-    
     // Tenants table
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tenants (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        tier TEXT NOT NULL DEFAULT 'starter',
         smtpHost TEXT,
         smtpPort INTEGER,
         smtpUser TEXT,
         smtpPass TEXT,
         fromName TEXT,
         fromEmail TEXT,
-        proposalCc TEXT,
-        webhookUrl TEXT,
-        webhookSecret TEXT,
         createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
@@ -118,79 +113,12 @@ export class DatabaseService {
       )
     `);
 
-    // Audit log table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS audit_logs (
-        id TEXT PRIMARY KEY,
-        tenantId TEXT NOT NULL,
-        userId TEXT,
-        action TEXT NOT NULL,
-        resource TEXT NOT NULL,
-        resourceId TEXT,
-        oldValues TEXT,
-        newValues TEXT,
-        ipAddress TEXT,
-        userAgent TEXT,
-        createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (tenantId) REFERENCES tenants(id)
-      )
-    `);
-
-    // Dead letter table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS dead_letters (
-        id TEXT PRIMARY KEY,
-        tenantId TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('email', 'webhook')),
-        payload TEXT NOT NULL,
-        error TEXT NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 1,
-        lastAttempt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (tenantId) REFERENCES tenants(id)
-      )
-    `);
-
-    // Mail log table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS mail_logs (
-        id TEXT PRIMARY KEY,
-        tenantId TEXT NOT NULL,
-        leadId TEXT,
-        toEmail TEXT NOT NULL,
-        cc TEXT,
-        subject TEXT NOT NULL,
-        sent INTEGER NOT NULL DEFAULT 0,
-        error TEXT,
-        createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (tenantId) REFERENCES tenants(id),
-        FOREIGN KEY (leadId) REFERENCES leads(id)
-      )
-    `);
-
-    // Idempotency keys table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS idempotency_keys (
-        key TEXT NOT NULL,
-        tenantId TEXT NOT NULL,
-        resource TEXT NOT NULL,
-        resourceId TEXT NOT NULL,
-        response TEXT NOT NULL,
-        expiresAt TEXT NOT NULL,
-        createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (key, tenantId),
-        FOREIGN KEY (tenantId) REFERENCES tenants(id)
-      )
-    `);
-
-    // Create indexes for performance
+    // Create indexes
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_yachts_tenant_area ON yachts(tenantId, area);
       CREATE INDEX IF NOT EXISTS idx_yachts_guests ON yachts(guests);
       CREATE INDEX IF NOT EXISTS idx_leads_tenant ON leads(tenantId);
       CREATE INDEX IF NOT EXISTS idx_events_tenant_type ON events(tenantId, type);
-      CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenantId, createdAt);
-      CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_keys(expiresAt);
     `);
   }
 
@@ -199,14 +127,13 @@ export class DatabaseService {
     const now = new Date().toISOString();
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO tenants 
-      (id, name, tier, smtpHost, smtpPort, smtpUser, smtpPass, fromName, fromEmail, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, name, smtpHost, smtpPort, smtpUser, smtpPass, fromName, fromEmail, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
       tenant.id,
       tenant.name,
-      tenant.tier || 'starter',
       tenant.smtpHost || null,
       tenant.smtpPort || null,
       tenant.smtpUser || null,
@@ -264,93 +191,47 @@ export class DatabaseService {
 
   searchYachts(tenantId: string, filters: {
     area?: string;
-    q?: string;
     type?: string;
     guests?: number;
-    strictGuests?: boolean;
+    strictGuests?: number;
     minLength?: number;
     maxLength?: number;
     maxPrice?: number;
     limit?: number;
-    offset?: number;
-  } = {}): { items: Yacht[], total: number } {
-    // Build count query first
-    let countQuery = 'SELECT COUNT(*) as total FROM yachts WHERE tenantId = ?';
+  }): Yacht[] {
     let query = 'SELECT * FROM yachts WHERE tenantId = ?';
     const params: any[] = [tenantId];
-    const countParams: any[] = [tenantId];
 
-    // Apply filters
     if (filters.area) {
-      const condition = ' AND LOWER(area) = LOWER(?)';
-      query += condition;
-      countQuery += condition;
+      query += ' AND area = ?';
       params.push(filters.area);
-      countParams.push(filters.area);
-    }
-
-    if (filters.q) {
-      const condition = ' AND (LOWER(name) LIKE LOWER(?) OR LOWER(builder) LIKE LOWER(?) OR LOWER(type) LIKE LOWER(?))';
-      const searchTerm = `%${filters.q}%`;
-      query += condition;
-      countQuery += condition;
-      params.push(searchTerm, searchTerm, searchTerm);
-      countParams.push(searchTerm, searchTerm, searchTerm);
     }
 
     if (filters.type) {
-      const condition = ' AND LOWER(type) = LOWER(?)';
-      query += condition;
-      countQuery += condition;
+      query += ' AND type = ?';
       params.push(filters.type);
-      countParams.push(filters.type);
     }
 
-    if (filters.guests && filters.strictGuests) {
-      // strictGuests=true: include yachts with y.guests >= guests AND (y.guests - guests) <= 2
-      const condition = ' AND guests >= ? AND (guests - ?) <= 2';
-      query += condition;
-      countQuery += condition;
-      params.push(filters.guests, filters.guests);
-      countParams.push(filters.guests, filters.guests);
-    } else if (filters.guests) {
-      const condition = ' AND guests >= ?';
-      query += condition;
-      countQuery += condition;
+    if (filters.guests && filters.strictGuests !== 0) {
+      query += ' AND guests >= ?';
       params.push(filters.guests);
-      countParams.push(filters.guests);
     }
 
     if (filters.minLength) {
-      const condition = ' AND length >= ?';
-      query += condition;
-      countQuery += condition;
+      query += ' AND length >= ?';
       params.push(filters.minLength);
-      countParams.push(filters.minLength);
     }
 
     if (filters.maxLength) {
-      const condition = ' AND length <= ?';
-      query += condition;
-      countQuery += condition;
+      query += ' AND length <= ?';
       params.push(filters.maxLength);
-      countParams.push(filters.maxLength);
     }
 
     if (filters.maxPrice) {
-      const condition = ' AND weeklyRate <= ?';
-      query += condition;
-      countQuery += condition;
+      query += ' AND weeklyRate <= ?';
       params.push(filters.maxPrice);
-      countParams.push(filters.maxPrice);
     }
 
-    // Get total count
-    const countStmt = this.db.prepare(countQuery);
-    const totalResult = countStmt.get(...countParams) as any;
-    const total = totalResult.total;
-
-    // Apply ordering and pagination
     query += ' ORDER BY weeklyRate ASC';
 
     if (filters.limit) {
@@ -358,16 +239,9 @@ export class DatabaseService {
       params.push(filters.limit);
     }
 
-    if (filters.offset) {
-      query += ' OFFSET ?';
-      params.push(filters.offset);
-    }
-
     const stmt = this.db.prepare(query);
     const rows = stmt.all(...params) as any[];
-    const items = rows.map(row => YachtSchema.parse(row));
-
-    return { items, total };
+    return rows.map(row => YachtSchema.parse(row));
   }
 
   // Lead operations

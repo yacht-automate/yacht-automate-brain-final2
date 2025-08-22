@@ -14,26 +14,13 @@ import {
   IngestEmailRequestSchema
 } from './types';
 import * as dotenv from 'dotenv';
-import { monitoring } from './monitoring';
-import { BackupService } from './backup';
-import { AuditService } from './services/audit';
-import { MetricsService } from './services/metrics';
-import { IdempotencyService } from './services/idempotency';
-import { DeadLetterService } from './services/deadletter';
-import { RetryService } from './services/retry';
-import { DashboardService } from './services/dashboard';
-import { SecurityUtils } from './utils/security';
-import { TierControl } from './tier-control';
 
 // Load environment variables
 dotenv.config();
 
 const PORT = parseInt(process.env.PORT || '5000');
 const HOST = '0.0.0.0';
-const ADMIN_KEY = process.env.ADMIN_KEY || 'yacht-brain-prod-2025-secure-key';
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? 
-  process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()) : 
-  ['http://localhost:3000', 'https://localhost:3000'];
+const ADMIN_KEY = process.env.ADMIN_KEY || 'changeme-admin';
 
 // Initialize services
 const db = new DatabaseService();
@@ -55,28 +42,15 @@ const fastify = Fastify({
   }
 });
 
-// Initialize all services
+// Initialize email service with logger
 const emailService = new EmailService(db, fastify.log);
 const seedService = new SeedService(db);
-const backupService = new BackupService(db);
 
-// Production hardening services
-const auditService = new AuditService(db);
-const metricsService = new MetricsService();
-const idempotencyService = new IdempotencyService(db);
-const deadLetterService = new DeadLetterService(db);
-const retryService = new RetryService();
-const dashboardService = new DashboardService(db);
-
-// Register plugins with security settings
-fastify.register(cors, {
-  origin: ALLOWED_ORIGINS,
-  credentials: true
-});
+// Register plugins in async function
+fastify.register(cors);
 fastify.register(rateLimit, {
-  max: 100,
-  timeWindow: '1 minute',
-  allowList: ['127.0.0.1']
+  max: 60,
+  timeWindow: '1 minute'
 });
 
 // Queue for background jobs (simple in-memory queue)
@@ -100,14 +74,14 @@ setInterval(async () => {
 
 // Middleware for tenant validation
 fastify.addHook('preHandler', async (request, reply) => {
-  const excludedPaths = ['/health'];
-  const adminPaths = ['/admin/tenant', '/admin/yachts/seed', '/admin/status', '/admin/backup', '/admin/export', '/admin/yachts/upload', '/admin/metrics', '/admin/audit', '/admin/dead-letters', '/admin/maintenance', '/admin/dashboard'];
+  const excludedPaths = ['/health', '/'];
+  const adminPaths = ['/admin/tenant', '/admin/yachts/seed'];
   
   if (excludedPaths.includes(request.url)) {
     return;
   }
 
-  if (request.url.startsWith('/admin/') || request.url.startsWith('/dashboard/metrics/') || request.url.startsWith('/dashboard/live/') || request.url.startsWith('/dashboard/export/')) {
+  if (adminPaths.some(path => request.url.startsWith(path))) {
     const adminKey = request.headers['x-admin-key'];
     if (adminKey !== ADMIN_KEY) {
       reply.code(401).send({ error: 'Invalid admin key' });
@@ -129,87 +103,29 @@ fastify.addHook('preHandler', async (request, reply) => {
   }
 
   (request as any).tenantId = tenantId;
-  (request as any).tenant = tenant;
 });
 
-// Routes - Headless mode: Return 400 for root access
-fastify.get('/', async (request, reply) => {
-  reply.code(400).send({ error: 'API only' });
+// Routes
+fastify.get('/', async () => {
+  return { 
+    service: 'Yacht Automate - Brain API',
+    status: 'operational',
+    version: '1.0.0',
+    endpoints: {
+      health: 'GET /health',
+      search: 'GET /yachts (requires X-Tenant-Id)',
+      lead: 'POST /lead (requires X-Tenant-Id)',
+      quote: 'POST /quote/calc (requires X-Tenant-Id)',
+      admin: 'POST /admin/* (requires X-Admin-Key)'
+    },
+    docs: 'See console logs for curl examples'
+  };
 });
 
-fastify.get('/health', async () => monitoring.getHealthStatus());
-
-// Integration endpoints for headless mode
-
-// Form-to-lead normalization endpoint
-fastify.post('/integrations/form-to-lead', async (request, reply) => {
-  try {
-    const tenantId = (request as any).tenantId;
-    const formData = request.body as any;
-    
-    // Normalize form data to standard lead format
-    const normalizedData = {
-      email: formData.email || formData.Email || formData.customerEmail || formData.contactEmail,
-      name: formData.name || formData.Name || formData.fullName || formData.customerName,
-      phone: formData.phone || formData.Phone || formData.phoneNumber || formData.contactPhone || null,
-      notes: formData.notes || formData.message || formData.description || formData.requirements || 'Form submission',
-      partySize: parseInt(formData.partySize || formData.guests || formData.numberOfGuests || formData.pax) || 2,
-      location: formData.location || formData.destination || formData.charterArea || null,
-      dates: formData.dates || formData.preferredDates || formData.travelDates || null,
-      budget: parseInt(formData.budget || formData.weeklyBudget || formData.charterBudget) || null
-    };
-
-    // Validate required fields
-    if (!normalizedData.email) {
-      reply.code(400).send({ error: 'Email is required' });
-      return;
-    }
-
-    // Create lead via existing endpoint logic
-    const lead = db.createLead({
-      ...normalizedData,
-      tenantId,
-      status: 'new'
-    });
-
-    db.logEvent({
-      tenantId,
-      type: 'form_to_lead',
-      payload: JSON.stringify({ leadId: lead.id, source: 'form_integration' })
-    });
-
-    return { leadId: lead.id, status: 'ok' };
-  } catch (error) {
-    fastify.log.error(error);
-    reply.code(400).send({ error: 'Invalid form data' });
-  }
+fastify.get('/health', async () => {
+  return { status: 'healthy', timestamp: new Date().toISOString() };
 });
 
-// Webhook dispatcher endpoint
-fastify.post('/integrations/webhook', async (request, reply) => {
-  try {
-    const tenantId = (request as any).tenantId;
-    const { event, payload } = request.body as { event: string; payload: any };
-    
-    // Store webhook event
-    const webhookEvent = db.logEvent({
-      tenantId,
-      type: 'webhook_dispatch',
-      payload: JSON.stringify({ event, payload, timestamp: new Date().toISOString() })
-    });
-
-    // TODO: Implement actual webhook delivery with retry logic
-    // For now, just log the webhook attempt
-    fastify.log.info({ tenantId, event, payload }, 'Webhook dispatch queued');
-
-    return { success: true, eventId: webhookEvent.id };
-  } catch (error) {
-    fastify.log.error(error);
-    reply.code(400).send({ error: 'Invalid webhook data' });
-  }
-});
-
-// Admin routes
 fastify.post('/admin/tenant', async (request, reply) => {
   try {
     const data = CreateTenantRequestSchema.parse(request.body);
@@ -251,28 +167,21 @@ fastify.post('/admin/yachts/seed', async (request, reply) => {
   }
 });
 
-// Yacht search endpoint
 fastify.get('/yachts', async (request) => {
   const tenantId = (request as any).tenantId;
   const filters = SearchYachtsRequestSchema.parse(request.query);
   
-  const searchResult = db.searchYachts(tenantId, filters);
+  const yachts = db.searchYachts(tenantId, filters);
   
   db.logEvent({
     tenantId,
     type: 'yacht_search',
-    payload: JSON.stringify({ filters, resultCount: searchResult.total })
+    payload: JSON.stringify({ filters, resultCount: yachts.length })
   });
 
-  return { 
-    items: searchResult.items, 
-    total: searchResult.total, 
-    limit: filters.limit, 
-    offset: filters.offset 
-  };
+  return { yachts, count: yachts.length };
 });
 
-// Lead creation endpoint
 fastify.post('/lead', async (request, reply) => {
   try {
     const tenantId = (request as any).tenantId;
@@ -295,59 +204,41 @@ fastify.post('/lead', async (request, reply) => {
     );
 
     const candidates = matches.slice(0, 10).map(m => m.yacht);
-    
-    // Calculate quotes for top candidates and queue email
+
+    // Queue email if we have matches
     if (candidates.length > 0) {
       const area = data.location || candidates[0].area;
+      const emailJob = emailService.createLeadReplyEmail(
+        data.email,
+        data.name,
+        area,
+        data.partySize,
+        candidates.slice(0, 4)
+      );
       
-      // Generate quotes for top 4 yachts
-      const candidatesWithQuotes = candidates.slice(0, 4).map(yacht => {
-        const quote = quoteCalc.calculateQuote(yacht, 1, 25, undefined, 0, 0, []);
-        
-        // Save quote to database
-        const savedQuote = db.createQuote({
-          tenantId,
-          yachtId: yacht.id!,
-          basePrice: quote.base,
-          apa: quote.apaAmount,
-          vat: quote.vatAmount,
-          extras: quote.extrasTotal,
-          total: quote.total,
-          currency: yacht.currency
-        });
-
-        return { yacht, quote };
-      });
-
-      // Queue email for background processing
-      emailQueue.push({
-        job: {
-          tenantId,
-          leadId: lead.id,
-          customerEmail: data.email,
-          customerName: data.name || 'Valued Customer',
-          yachtCandidates: candidatesWithQuotes
-        },
-        retries: 0
-      });
-
-      // Log lead processing
-      db.logEvent({
-        tenantId,
-        type: 'lead_processed',
-        payload: JSON.stringify({
-          leadId: lead.id,
-          matchCount: matches.length,
-          quotesGenerated: candidatesWithQuotes.length
-        })
-      });
+      emailJob.tenantId = tenantId;
+      emailJob.leadId = lead.id;
+      
+      emailQueue.push({ job: emailJob, retries: 0 });
     }
+
+    db.logEvent({
+      tenantId,
+      type: 'lead_created',
+      entityId: lead.id,
+      payload: JSON.stringify({
+        leadId: lead.id,
+        email: data.email,
+        partySize: data.partySize,
+        matchCount: candidates.length
+      })
+    });
 
     return {
       success: true,
       lead,
-      matchCount: matches.length,
-      candidates: candidates.slice(0, 5)
+      candidates,
+      matchCount: candidates.length
     };
   } catch (error) {
     fastify.log.error(error);
@@ -355,559 +246,208 @@ fastify.post('/lead', async (request, reply) => {
   }
 });
 
-// Quote calculation endpoint
 fastify.post('/quote/calc', async (request, reply) => {
   try {
     const tenantId = (request as any).tenantId;
     const data = CalculateQuoteRequestSchema.parse(request.body);
     
     const yacht = db.getYacht(data.yachtId);
-    if (!yacht) {
+    if (!yacht || yacht.tenantId !== tenantId) {
       reply.code(404).send({ error: 'Yacht not found' });
       return;
     }
 
-    const quote = quoteCalc.calculateQuote(
-      yacht, 
-      data.weeks, 
-      data.apaPct, 
-      data.vatPct, 
-      data.gratuityPct, 
-      data.deliveryFee, 
-      data.extras
-    );
+    const breakdown = quoteCalc.calculateQuote(yacht, data.weeks, data.extras);
     
-    // Save quote to database
-    const savedQuote = db.createQuote({
+    // Save quote
+    const quote = db.createQuote({
       tenantId,
-      yachtId: yacht.id!,
-      basePrice: quote.base,
-      apa: quote.apaAmount,
-      vat: quote.vatAmount,
-      extras: quote.extrasTotal,
-      total: quote.total,
-      currency: yacht.currency
+      yachtId: data.yachtId,
+      basePrice: breakdown.basePrice,
+      apa: breakdown.apa,
+      vat: breakdown.vat,
+      extras: breakdown.extras,
+      total: breakdown.total,
+      currency: breakdown.currency
     });
 
     db.logEvent({
       tenantId,
       type: 'quote_calculated',
-      payload: JSON.stringify({ quoteId: savedQuote.id, yachtId: yacht.id })
+      entityId: quote.id,
+      payload: JSON.stringify({
+        yachtId: data.yachtId,
+        weeks: data.weeks,
+        total: breakdown.total
+      })
     });
 
-    return quote;
+    return {
+      success: true,
+      quote: breakdown,
+      formatted: quoteCalc.formatQuoteBreakdown(breakdown)
+    };
   } catch (error) {
     fastify.log.error(error);
     reply.code(400).send({ error: 'Invalid request data' });
   }
 });
 
-// Email ingestion endpoint
 fastify.post('/ingest/email', async (request, reply) => {
   try {
     const tenantId = (request as any).tenantId;
     const data = IngestEmailRequestSchema.parse(request.body);
     
-    // Extract party size from email
-    const partyMatch = data.body.match(/(\d+)\s*(people|guests|persons|pax)/i);
-    const partySize = partyMatch ? parseInt(partyMatch[1]) : 4;
+    // Simple email parsing - extract party size and location hints
+    const body = data.body.toLowerCase();
+    const subject = data.subject.toLowerCase();
+    const combined = `${subject} ${body}`;
     
-    // Extract location from email
-    const locationRegex = /(mediterranean|caribbean|bahamas|greek islands|french riviera|croatia|turkey)/i;
-    const locationMatch = data.body.match(locationRegex);
-    const location = locationMatch ? locationMatch[1] : null;
+    // Extract party size
+    let partySize = 4; // default
+    const guestMatches = combined.match(/(\d+)\s*(?:guests?|people|persons?|pax)/);
+    if (guestMatches) {
+      partySize = parseInt(guestMatches[1]);
+    }
+
+    // Extract location hints
+    let location = '';
+    if (combined.includes('mediterranean') || combined.includes('med')) location = 'Mediterranean';
+    else if (combined.includes('caribbean')) location = 'Caribbean';
+    else if (combined.includes('bahamas')) location = 'Bahamas';
 
     // Create lead from email
     const lead = db.createLead({
       tenantId,
       email: data.from,
-      name: data.from.split('@')[0],
-      notes: `${data.subject}: ${data.body}`,
+      notes: `${data.subject}\n\n${data.body}`,
       partySize,
-      location,
-      status: 'new'
+      location: location || undefined,
+      status: 'parsed'
     });
 
     db.logEvent({
       tenantId,
       type: 'email_ingested',
-      payload: JSON.stringify({ leadId: lead.id, from: data.from })
-    });
-
-    return { success: true, lead };
-  } catch (error) {
-    fastify.log.error(error);
-    reply.code(400).send({ error: 'Invalid email data' });
-  }
-});
-
-// Admin status endpoint
-fastify.get('/admin/status', async () => {
-  const status = monitoring.getHealthStatus();
-  return status;
-});
-
-// Backup endpoint
-fastify.post('/admin/backup', async () => {
-  const backup = backupService.createBackup();
-  return { success: true, backup };
-});
-
-// Production hardening endpoints
-
-// Admin: Metrics endpoint
-fastify.get('/admin/metrics', async (request, reply) => {
-  const adminKey = request.headers['x-admin-key'] as string;
-  if (adminKey !== ADMIN_KEY) {
-    reply.code(401).send({ error: 'Admin key required' });
-    return;
-  }
-
-  return {
-    counters: metricsService.getCounters(),
-    prometheus: metricsService.getPrometheusMetrics(),
-    timestamp: new Date().toISOString()
-  };
-});
-
-// Admin: Audit logs endpoint  
-fastify.get('/admin/audit/:tenantId', async (request, reply) => {
-  const adminKey = request.headers['x-admin-key'] as string;
-  if (adminKey !== ADMIN_KEY) {
-    reply.code(401).send({ error: 'Admin key required' });
-    return;
-  }
-
-  const { tenantId } = request.params as { tenantId: string };
-  const limit = parseInt((request.query as any).limit || '100');
-  const offset = parseInt((request.query as any).offset || '0');
-
-  const logs = auditService.getAuditLogs(tenantId, limit, offset);
-  return { logs };
-});
-
-// Admin: Dead letter queue endpoint
-fastify.get('/admin/dead-letters/:tenantId', async (request, reply) => {
-  const adminKey = request.headers['x-admin-key'] as string;
-  if (adminKey !== ADMIN_KEY) {
-    reply.code(401).send({ error: 'Admin key required' });
-    return;
-  }
-
-  const { tenantId } = request.params as { tenantId: string };
-  const limit = parseInt((request.query as any).limit || '50');
-
-  const deadLetters = deadLetterService.getDeadLetters(tenantId, limit);
-  return { deadLetters };
-});
-
-// Admin: System maintenance endpoint
-fastify.post('/admin/maintenance', async (request, reply) => {
-  const adminKey = request.headers['x-admin-key'] as string;
-  if (adminKey !== ADMIN_KEY) {
-    reply.code(401).send({ error: 'Admin key required' });
-    return;
-  }
-
-  const { action } = request.body as { action: string };
-  const results: any = {};
-
-  try {
-    switch (action) {
-      case 'cleanup_expired_keys':
-        results.expiredKeys = idempotencyService.cleanExpiredKeys();
-        break;
-      case 'cleanup_old_audit':
-        results.auditRecords = auditService.cleanOldLogs(90);
-        break;
-      case 'cleanup_old_dead_letters':
-        results.deadLetters = deadLetterService.cleanOldDeadLetters(7);
-        break;
-      case 'backup_database':
-        await backupService.createBackup();
-        results.backup = 'completed';
-        break;
-      default:
-        reply.code(400).send({ error: 'Invalid maintenance action' });
-        return;
-    }
-  } catch (error) {
-    results.error = (error as Error).message;
-  }
-
-  auditService.logAction({
-    tenantId: 'system',
-    action: 'maintenance',
-    resource: 'system',
-    newValues: { action, results }
-  });
-
-  return { success: true, action, results };
-});
-
-// Middleware for audit logging and metrics
-fastify.addHook('onRequest', async (request, reply) => {
-  metricsService.increment('requests_total');
-  
-  if (request.url === '/health' || request.url.startsWith('/admin/metrics')) {
-    return;
-  }
-  
-  const tenantId = request.headers['x-tenant-id'] as string;
-  if (tenantId) {
-    auditService.logAction({
-      tenantId,
-      action: 'api_request',
-      resource: request.method + ' ' + request.url,
-      ipAddress: request.ip,
-      userAgent: request.headers['user-agent'] as string,
-      newValues: SecurityUtils.sanitizeLogData({
-        method: request.method,
-        url: request.url
+      entityId: lead.id,
+      payload: JSON.stringify({
+        from: data.from,
+        subject: data.subject,
+        parsedPartySize: partySize,
+        parsedLocation: location
       })
     });
-  }
-});
 
-// Enhanced error handler
-fastify.setErrorHandler(async (error, request, reply) => {
-  metricsService.increment('errors_total');
-  
-  const tenantId = request.headers['x-tenant-id'] as string;
-  
-  if (tenantId) {
-    auditService.logAction({
-      tenantId,
-      action: 'api_error',
-      resource: request.method + ' ' + request.url,
-      newValues: {
-        error: error.message,
-        statusCode: error.statusCode || 500
-      }
-    });
-
-    if (!error.statusCode || error.statusCode >= 500) {
-      deadLetterService.store({
-        tenantId,
-        type: 'email',
-        payload: {
-          error: error.message,
-          request: {
-            method: request.method,
-            url: request.url
-          }
-        },
-        error: error.message,
-        attempts: 1
-      });
-    }
-  }
-  
-  reply.status(error.statusCode || 500).send({
-    error: error.message,
-    statusCode: error.statusCode || 500
-  });
-});
-
-// Dashboard Analytics API Endpoints
-
-// Get comprehensive dashboard metrics
-fastify.get('/dashboard/metrics/:tenantId', async (request, reply) => {
-  const adminKey = request.headers['x-admin-key'] as string;
-  if (adminKey !== ADMIN_KEY) {
-    reply.code(401).send({ error: 'Admin key required' });
-    return;
-  }
-
-  try {
-    const { tenantId } = request.params as { tenantId: string };
-    const { startDate, endDate } = request.query as { startDate?: string; endDate?: string };
-    
-    const dateRange = startDate && endDate ? { startDate, endDate } : undefined;
-    const metrics = await dashboardService.getDashboardMetrics(tenantId, dateRange);
-    
-    auditService.logAction({
-      tenantId,
-      action: 'dashboard_viewed',
-      resource: 'dashboard_metrics',
-      newValues: { dateRange }
-    });
-    
-    return metrics;
-  } catch (error) {
-    fastify.log.error(error);
-    reply.code(500).send({ error: 'Failed to fetch dashboard metrics' });
-  }
-});
-
-// Get live metrics for real-time dashboard updates
-fastify.get('/dashboard/live/:tenantId', async (request, reply) => {
-  const adminKey = request.headers['x-admin-key'] as string;
-  if (adminKey !== ADMIN_KEY) {
-    reply.code(401).send({ error: 'Admin key required' });
-    return;
-  }
-
-  try {
-    const { tenantId } = request.params as { tenantId: string };
-    const liveMetrics = await dashboardService.getLiveMetrics(tenantId);
-    
-    return liveMetrics;
-  } catch (error) {
-    fastify.log.error(error);
-    reply.code(500).send({ error: 'Failed to fetch live metrics' });
-  }
-});
-
-// Export dashboard data
-fastify.get('/dashboard/export/:tenantId', async (request, reply) => {
-  const adminKey = request.headers['x-admin-key'] as string;
-  if (adminKey !== ADMIN_KEY) {
-    reply.code(401).send({ error: 'Admin key required' });
-    return;
-  }
-
-  try {
-    const { tenantId } = request.params as { tenantId: string };
-    const { format, startDate, endDate } = request.query as { 
-      format?: 'json' | 'csv'; 
-      startDate?: string; 
-      endDate?: string; 
-    };
-    
-    const dateRange = startDate && endDate ? { startDate, endDate } : undefined;
-    const exportData = await dashboardService.exportDashboardData(
-      tenantId, 
-      format || 'json', 
-      dateRange
-    );
-    
-    auditService.logAction({
-      tenantId,
-      action: 'dashboard_exported',
-      resource: 'dashboard_export',
-      newValues: { format: format || 'json', dateRange }
-    });
-    
-    if (format === 'csv') {
-      reply.header('Content-Type', 'text/csv');
-      reply.header('Content-Disposition', `attachment; filename="dashboard-${tenantId}-${new Date().toISOString().split('T')[0]}.csv"`);
-      return exportData;
-    }
-    
-    return exportData;
-  } catch (error) {
-    fastify.log.error(error);
-    reply.code(500).send({ error: 'Failed to export dashboard data' });
-  }
-});
-
-// Tenant-specific dashboard endpoints (require tenant ID header)
-
-// Get tenant dashboard overview (simplified metrics for tenant users)
-fastify.get('/dashboard/overview', async (request, reply) => {
-  try {
-    const tenantId = (request as any).tenantId;
-    
-    // Get basic metrics without full admin access
-    const metrics = await dashboardService.getDashboardMetrics(tenantId);
-    
-    // Return simplified view for tenant users
-    const overview = {
-      leads: {
-        total: metrics.totalLeads,
-        today: metrics.leadsToday,
-        thisWeek: metrics.leadsThisWeek,
-        thisMonth: metrics.leadsThisMonth,
-        byStatus: metrics.leadsByStatus
-      },
-      quotes: {
-        total: metrics.totalQuotes,
-        today: metrics.quotesToday,
-        averageValue: metrics.averageQuoteValue,
-        conversionRate: metrics.quoteConversionRate
-      },
-      yachts: {
-        total: metrics.totalYachts,
-        byArea: metrics.yachtsByArea,
-        popular: metrics.popularYachts.slice(0, 5) // Top 5 only
-      },
-      performance: {
-        responseTime: metrics.averageResponseTime,
-        uptime: metrics.systemUptime
-      }
-    };
-    
-    auditService.logAction({
-      tenantId,
-      action: 'dashboard_overview_viewed',
-      resource: 'tenant_dashboard'
-    });
-    
-    metricsService.increment('requests_total');
-    
-    return overview;
-  } catch (error) {
-    fastify.log.error(error);
-    reply.code(500).send({ error: 'Failed to fetch dashboard overview' });
-  }
-});
-
-// Get analytics charts data
-fastify.get('/dashboard/charts', async (request, reply) => {
-  try {
-    const tenantId = (request as any).tenantId;
-    const { type, days } = request.query as { type?: string; days?: string };
-    
-    const daysBack = parseInt(days || '30');
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - daysBack);
-    
-    const dateRange = {
-      startDate: startDate.toISOString(),
-      endDate: new Date().toISOString()
-    };
-    
-    const metrics = await dashboardService.getDashboardMetrics(tenantId, dateRange);
-    
-    let chartData = {};
-    
-    switch (type) {
-      case 'leads':
-        chartData = {
-          leadsByDay: metrics.leadsByDay,
-          leadsByLocation: metrics.leadsByLocation,
-          leadsByStatus: metrics.leadsByStatus
-        };
-        break;
-      case 'quotes':
-        chartData = {
-          quotesByDay: metrics.quotesByDay,
-          conversionTrend: metrics.conversionTrend
-        };
-        break;
-      case 'revenue':
-        chartData = {
-          revenueByArea: metrics.revenueByArea,
-          revenueByLocation: metrics.revenueByLocation,
-          topPerformingYachts: metrics.topPerformingYachts.slice(0, 10)
-        };
-        break;
-      case 'customers':
-        chartData = {
-          partySizeDistribution: metrics.partySizeDistribution,
-          averagePartySize: metrics.averagePartySize,
-          repeatCustomers: metrics.repeatCustomers
-        };
-        break;
-      default:
-        chartData = {
-          leadsByDay: metrics.leadsByDay.slice(-14), // Last 2 weeks
-          quotesByDay: metrics.quotesByDay.slice(-14),
-          conversionTrend: metrics.conversionTrend.slice(-14)
-        };
-    }
-    
     return {
-      type: type || 'summary',
-      dateRange,
-      data: chartData
+      success: true,
+      lead,
+      parsed: {
+        partySize,
+        location: location || null
+      }
     };
   } catch (error) {
     fastify.log.error(error);
-    reply.code(500).send({ error: 'Failed to fetch chart data' });
+    reply.code(400).send({ error: 'Invalid request data' });
   }
 });
 
-// Start server with headless banner
-async function start() {
+// Start server
+const start = async () => {
   try {
     await fastify.listen({ port: PORT, host: HOST });
     
-    console.log('================================================================================');
-    console.log('🛥️  YACHT AUTOMATE - BRAIN API STARTED (HEADLESS MODE)');
-    console.log('================================================================================');
+    console.log('\n' + '='.repeat(80));
+    console.log('🛥️  YACHT AUTOMATE - BRAIN API STARTED');
+    console.log('='.repeat(80));
     console.log(`Server listening on http://${HOST}:${PORT}`);
-    console.log('Environment:', process.env.NODE_ENV || 'development');
-    console.log('Admin Key:', ADMIN_KEY);
-    console.log('Headless mode: UI disabled, JSON API only.');
-    console.log('================================================================================');
-    console.log('📖 HEADLESS RUNBOOK - API USAGE EXAMPLES');
-    console.log('================================================================================');
-    console.log('1. Health Check:');
-    console.log(`curl -X GET "http://localhost:${PORT}/health"`);
-    console.log('');
-    console.log('2. Create Tenant (Admin):');
-    console.log(`curl -X POST "http://localhost:${PORT}/admin/tenant" \\`);
-    console.log(`  -H "X-Admin-Key: ${ADMIN_KEY}" \\`);
-    console.log('  -H "Content-Type: application/json" \\');
-    console.log('  -d \'{');
-    console.log('    "id": "demo-charter",');
-    console.log('    "name": "Demo Charter Company",');
-    console.log('    "fromName": "Demo Charters",');
-    console.log('    "fromEmail": "charters@demo.com"');
-    console.log('  }\'');
-    console.log('');
-    console.log('3. Seed Yachts (Admin):');
-    console.log(`curl -X POST "http://localhost:${PORT}/admin/yachts/seed" \\`);
-    console.log(`  -H "X-Admin-Key: ${ADMIN_KEY}" \\`);
-    console.log('  -H "X-Tenant-Id: demo-charter"');
-    console.log('');
-    console.log('4. Form-to-Lead (Integration):');
-    console.log(`curl -X POST "http://localhost:${PORT}/integrations/form-to-lead" \\`);
-    console.log('  -H "X-Tenant-Id: demo-charter" \\');
-    console.log('  -H "Content-Type: application/json" \\');
-    console.log('  -d \'{');
-    console.log('    "customerEmail": "client@example.com",');
-    console.log('    "fullName": "John Smith",');
-    console.log('    "numberOfGuests": 8,');
-    console.log('    "destination": "Mediterranean",');
-    console.log('    "message": "Looking for luxury yacht charter"');
-    console.log('  }\' # Returns {leadId, status:"ok"}');
-    console.log('');
-    console.log('5. Search Yachts:');
-    console.log(`curl -X GET "http://localhost:${PORT}/yachts?area=Mediterranean&guests=8&limit=5" \\`);
-    console.log('  -H "X-Tenant-Id: demo-charter"');
-    console.log('');
-    console.log('6. Calculate Quote:');
-    console.log(`curl -X POST "http://localhost:${PORT}/quote/calc" \\`);
-    console.log('  -H "X-Tenant-Id: demo-charter" \\');
-    console.log('  -H "Content-Type: application/json" \\');
-    console.log('  -d \'{');
-    console.log('    "yachtId": "YACHT_ID_FROM_SEARCH",');
-    console.log('    "weeks": 1,');
-    console.log('    "extras": 5000');
-    console.log('  }\' # Returns {breakdown,total}');
-    console.log('');
-    console.log('7. Webhook Dispatch:');
-    console.log(`curl -X POST "http://localhost:${PORT}/integrations/webhook" \\`);
-    console.log('  -H "X-Tenant-Id: demo-charter" \\');
-    console.log('  -H "Content-Type: application/json" \\');
-    console.log('  -d \'{');
-    console.log('    "event": "lead.created",');
-    console.log('    "payload": {"leadId": "lead_123", "email": "test@example.com"}');
-    console.log('  }\'');
-    console.log('');
-    console.log('8. Email Ingestion:');
-    console.log(`curl -X POST "http://localhost:${PORT}/ingest/email" \\`);
-    console.log('  -H "X-Tenant-Id: demo-charter" \\');
-    console.log('  -H "Content-Type: application/json" \\');
-    console.log('  -d \'{');
-    console.log('    "from": "inquiry@example.com",');
-    console.log('    "subject": "Charter inquiry for 6 guests",');
-    console.log('    "body": "Hi, we are looking to charter a yacht in the Bahamas for 6 people."');
-    console.log('  }\'');
-    console.log('================================================================================');
-    console.log('🚀 Ready to process yacht charter leads!');
-    console.log('📧 Email automation: SMTP not configured - emails will log to console');
-    console.log('💾 Database: SQLite at db/data.sqlite');
-    console.log('🔐 Multi-tenant: Use X-Tenant-Id header for all non-admin requests');
-    console.log('🎯 Integration ready: Form-to-lead & webhook endpoints active');
-    console.log('================================================================================');
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`Admin Key: ${ADMIN_KEY}`);
+    console.log('='.repeat(80));
+    
+    // Print runbook
+    printRunbook();
+    
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
   }
+};
+
+function printRunbook() {
+  const baseUrl = `http://localhost:${PORT}`;
+  
+  console.log('\n📖 RUNBOOK - API USAGE EXAMPLES');
+  console.log('='.repeat(80));
+  
+  console.log('\n1. Health Check:');
+  console.log(`curl -X GET "${baseUrl}/health"`);
+  
+  console.log('\n2. Create Tenant (Admin):');
+  console.log(`curl -X POST "${baseUrl}/admin/tenant" \\
+  -H "X-Admin-Key: ${ADMIN_KEY}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "id": "demo-charter",
+    "name": "Demo Charter Company",
+    "fromName": "Demo Charters",
+    "fromEmail": "charters@demo.com"
+  }'`);
+  
+  console.log('\n3. Seed Yachts (Admin):');
+  console.log(`curl -X POST "${baseUrl}/admin/yachts/seed" \\
+  -H "X-Admin-Key: ${ADMIN_KEY}" \\
+  -H "X-Tenant-Id: demo-charter"`);
+  
+  console.log('\n4. Search Yachts:');
+  console.log(`curl -X GET "${baseUrl}/yachts?area=Mediterranean&guests=8&limit=5" \\
+  -H "X-Tenant-Id: demo-charter"`);
+  
+  console.log('\n5. Search Yachts (Bahamas):');
+  console.log(`curl -X GET "${baseUrl}/yachts?area=Bahamas&guests=6" \\
+  -H "X-Tenant-Id: demo-charter"`);
+  
+  console.log('\n6. Submit Lead:');
+  console.log(`curl -X POST "${baseUrl}/lead" \\
+  -H "X-Tenant-Id: demo-charter" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "email": "client@example.com",
+    "name": "John Smith",
+    "notes": "Looking for a luxury motor yacht in the Mediterranean for summer charter",
+    "partySize": 8,
+    "location": "Mediterranean",
+    "dates": "July 2024",
+    "budget": 150000
+  }'`);
+  
+  console.log('\n7. Calculate Quote:');
+  console.log(`# First get a yacht ID from search, then:
+curl -X POST "${baseUrl}/quote/calc" \\
+  -H "X-Tenant-Id: demo-charter" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "yachtId": "YACHT_ID_FROM_SEARCH",
+    "weeks": 1,
+    "extras": 5000
+  }'`);
+  
+  console.log('\n8. Ingest Email:');
+  console.log(`curl -X POST "${baseUrl}/ingest/email" \\
+  -H "X-Tenant-Id: demo-charter" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "from": "inquiry@example.com",
+    "subject": "Charter inquiry for 6 guests",
+    "body": "Hi, we are looking to charter a yacht in the Bahamas for 6 people next month. Budget around $50k per week."
+  }'`);
+  
+  console.log('\n' + '='.repeat(80));
+  console.log('🚀 Ready to process yacht charter leads!');
+  console.log('📧 Email automation: SMTP not configured - emails will log to console');
+  console.log('💾 Database: SQLite at db/data.sqlite');
+  console.log('🔐 Multi-tenant: Use X-Tenant-Id header for all non-admin requests');
+  console.log('='.repeat(80) + '\n');
 }
 
 start();

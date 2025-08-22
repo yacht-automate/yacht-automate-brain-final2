@@ -20,7 +20,7 @@ export class EmailService {
       this.db.logEvent({
         tenantId: job.tenantId,
         type: 'email_attempt',
-        entityId: job.leadId?.toString() || null,
+        entityId: job.leadId,
         payload: JSON.stringify({
           to: job.to,
           subject: job.subject,
@@ -28,34 +28,31 @@ export class EmailService {
         })
       });
 
-      // Try global SMTP first, then tenant-specific
-      const smtpConfig = this.getSmtpConfig(tenant);
-      
-      if (!smtpConfig.host || !smtpConfig.user) {
+      // Check if SMTP is configured
+      if (!tenant.smtpHost || !tenant.smtpUser || !tenant.smtpPass) {
         this.logger.info(
           { tenantId: job.tenantId, to: job.to },
           'No SMTP configured - logging email to console'
         );
-        this.logEmailToConsole(job, smtpConfig.fromName);
+        this.logEmailToConsole(job, tenant.fromName || 'Yacht Charter');
         return true;
       }
 
       // Create transporter
       const transporter = nodemailer.createTransport({
-        host: smtpConfig.host,
-        port: smtpConfig.port || 587,
-        secure: smtpConfig.port === 465,
+        host: tenant.smtpHost,
+        port: tenant.smtpPort || 587,
+        secure: tenant.smtpPort === 465,
         auth: {
-          user: smtpConfig.user,
-          pass: smtpConfig.pass
+          user: tenant.smtpUser,
+          pass: tenant.smtpPass
         }
       });
 
       // Send email
       const info = await transporter.sendMail({
-        from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
+        from: `"${tenant.fromName || 'Yacht Charter'}" <${tenant.fromEmail || tenant.smtpUser}>`,
         to: job.to,
-        cc: job.cc,
         subject: job.subject,
         html: job.body
       });
@@ -68,7 +65,7 @@ export class EmailService {
       this.db.logEvent({
         tenantId: job.tenantId,
         type: 'email_sent',
-        entityId: job.leadId?.toString() || null,
+        entityId: job.leadId,
         payload: JSON.stringify({
           to: job.to,
           messageId: info.messageId,
@@ -87,7 +84,7 @@ export class EmailService {
       this.db.logEvent({
         tenantId: job.tenantId,
         type: 'email_failed',
-        entityId: job.leadId?.toString() || null,
+        entityId: job.leadId,
         payload: JSON.stringify({
           to: job.to,
           error: errorMessage,
@@ -167,7 +164,7 @@ export class EmailService {
             <strong>Weekly Charter: ${formatter.format(quote.total)}</strong>
           </p>
           <p style="margin: 5px 0; font-size: 12px; color: #888;">
-            Includes base rate ${formatter.format(quote.base)}, APA ${formatter.format(quote.apaAmount)}, and VAT ${formatter.format(quote.vatAmount)}
+            Includes base rate ${formatter.format(quote.basePrice)}, APA ${formatter.format(quote.apa)}, and VAT ${formatter.format(quote.vat)}
           </p>
         </div>
       `;
@@ -209,17 +206,5 @@ export class EmailService {
       </body>
       </html>
     `;
-  }
-
-  private getSmtpConfig(tenant: any) {
-    // Use environment variables as fallback if tenant SMTP not configured
-    return {
-      host: tenant.smtpHost || process.env.SMTP_HOST,
-      port: tenant.smtpPort || parseInt(process.env.SMTP_PORT || '587'),
-      user: tenant.smtpUser || process.env.SMTP_USER,
-      pass: tenant.smtpPass || process.env.SMTP_PASS,
-      fromName: tenant.fromName || process.env.FROM_NAME || 'Yacht Charter Automation',
-      fromEmail: tenant.fromEmail || process.env.FROM_EMAIL || process.env.SMTP_USER
-    };
   }
 }
