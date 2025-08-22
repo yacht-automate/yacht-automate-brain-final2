@@ -1,0 +1,51 @@
+Yacht Automate — Headless Mode Only (No UI)
+Update the project to be strictly API‑only with zero HTML pages, assets, or UI routes.
+
+Hard constraints
+	•	Do not serve any web pages. If someone hits /, return 400 with { "error":"API only" }.
+	•	Remove/disable any static file serving, templating, or HTML generation endpoints. Emails can still be generated as HTML strings for sending/logging, but nothing is publicly rendered.
+	•	Enforce CORS to allowed origins only via ALLOWED_ORIGINS env (CSV).
+	•	All business logic must be accessible only via JSON endpoints and webhooks, authenticated by headers:
+	•	Admin: X-Admin-Key = ADMIN_KEY
+	•	Tenant: X-Tenant-Id (required for all non‑admin routes)
+
+Deliverables (headless)
+	•	Keep the current endpoints (lead intake, yacht search, quote calc, itinerary, email send/log, CRM sync, payments stub, analytics, jobs runner) unchanged, but ensure all return JSON only.
+	•	Add two integration helpers (still API‑only, JSON):
+	1.	POST /integrations/form-to-lead
+	•	Accepts a generic payload from a client’s existing website form (keys may vary).
+	•	Normalizes to { email, name, phone?, notes?, partySize?, location?, dates?, budget? } and internally calls /lead.
+	•	Returns { leadId, status:"ok" } (or 400 with {error}).
+	2.	POST /integrations/webhook
+	•	Stores & dispatches events to the tenant’s configured webhook(s): { event:"lead.created"|"quote.sent"|... , payload:{} }.
+	•	Retries with exponential backoff; records status in webhooks table.
+
+Security & env
+	•	Respect these envs (no UI behavior anywhere):
+	•	ADMIN_KEY (required)
+	•	ALLOWED_ORIGINS (CSV; include customers’ domains)
+	•	SMTP_HOST/USER/PASS, FROM_NAME, FROM_EMAIL (optional; log to console if missing)
+	•	STRIPE_SECRET (optional; stub if missing)
+	•	HUBSPOT_* (optional; log if missing)
+
+Headless test checklist (print in console as RUNBOOK)
+	•	Health: GET /health → {status:"healthy"}
+	•	Seed tenant & yachts (admin): POST /admin/tenant, POST /admin/yachts/seed
+	•	Form passthrough: POST /integrations/form-to-lead with messy keys → returns {leadId}
+	•	Search: GET /yachts?area=Bahamas&guests=6&type=motor&limit=5
+	•	Quote: POST /quote/calc → returns {breakdown,total}
+	•	Email: POST /quote/send → logs “EMAIL WOULD BE SENT” if SMTP missing
+	•	CRM: POST /crm/push → logs if not configured
+	•	Webhook fanout: POST /integrations/webhook → queues + retries
+	•	Analytics: GET /analytics/summary?range=30d → JSON
+	•	Jobs runner: shows due jobs moving from queued → done
+
+Integration notes for my clients (document in README, no code/UI)
+	•	They can keep their current website/forms/CRM.
+	•	Wire their form to POST /integrations/form-to-lead with X‑Tenant‑Id.
+	•	Set their webhook URL in admin (so we can push lead.created, quote.sent, payment.intent, etc.).
+	•	Optional: call /yachts for server‑side recommendations and show in their UI; we only return JSON.
+	•	Optional: turn on SMTP or CRM keys to send real emails / sync leads.
+	•	Everything is behind the scenes; we never render UI.
+
+When done, confirm in the console banner: “Headless mode: UI disabled, JSON API only.”

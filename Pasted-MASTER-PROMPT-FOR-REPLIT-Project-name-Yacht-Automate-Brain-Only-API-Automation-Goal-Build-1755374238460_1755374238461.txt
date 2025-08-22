@@ -1,0 +1,75 @@
+MASTER PROMPT FOR REPLIT:
+
+Project name: Yacht Automate – Brain Only (API + Automation)
+
+Goal: Build a production-lean “brain” for yacht businesses. No public UI. Just an HTTPS API and background jobs that:
+	•	Accept leads (webhook/API).
+	•	Parse intent (location, dates, guests, boat type, budget).
+	•	Match to yachts from a built-in knowledge base (per region).
+	•	Calculate estimated charter totals (base + APA + VAT + extras).
+	•	Send a reply email from the client’s own mailbox (tenant SMTP) or fallback to console logging in dev.
+	•	Log all events so no lead is ever missed.
+
+Core requirements:
+	•	Stack: Node.js 20, Fastify, TypeScript, SQLite (file at db/data.sqlite), better-sqlite3, BullMQ-lite (in-process queue), Nodemailer (SMTP), dotenv, zod, pino logging.
+	•	No UI. Expose JSON endpoints only.
+	•	Multi-tenant ready (lite): Every API call carries X-Tenant-Id. Data rows include tenantId. One tenant is fine for now; keep structure.
+	•	RBAC (simple): Admin key via header X-Admin-Key for admin endpoints.
+	•	Email: Use Nodemailer SMTP with per-tenant config stored in DB (host, port, user, pass, fromName, fromEmail). If missing, log to console instead of sending.
+	•	Environment variables (.env): PORT=8080, ADMIN_KEY=changeme-admin, OPENAI_API_KEY=sk-…, NODE_ENV=production.
+	•	Data model (SQLite): tenants, yachts, leads, quotes, events tables with proper fields. Tenants include smtp credentials. Yachts include type, area, cabins, guests, weekly rate. Leads include notes and party size. Quotes include APA, VAT, extras, and totals.
+	•	Seed data: Create 40 demo yachts (20 Med, 10 Caribbean, 10 Bahamas) with realistic builders (Benetti, Sanlorenzo, Heesen, Feadship, Perini Navi, Sunseeker, Azimut, Lagoon, etc.), sample lengths, cabins, guests, and rates. Ensure guests values allow strict filtering. Currency mix EUR/USD as appropriate.
+	•	Matching rules: tokenize input, strictGuests enforcement, map location tokens to areas, type match, score by area + tokens, sort by score then price. Never return yachts with fewer guests than requested.
+	•	Quote calculation: must return breakdown (base, apa, vat, extras, total).
+	•	Lead reply email: automatically queued, subject “Your charter options — {area} — {guests} guests”, body with 2–4 yacht options and CTA.
+	•	Observability: log all payloads into events, use pino logs with tenantId.
+	•	Security: validate payloads with zod, rate limit basic (60 req/min per IP). Require X-Tenant-Id except /health and admin.
+	•	Docs: README printed on boot with curl examples.
+
+API surface:
+	•	GET /health
+	•	POST /admin/tenant (admin only, create/update tenant)
+	•	POST /admin/yachts/seed (admin only, seed yachts)
+	•	GET /yachts (search, filters)
+	•	POST /lead (create lead, auto match and queue email)
+	•	POST /quote/calc (calculate breakdown)
+	•	POST /ingest/email (parse inbound emails into leads)
+
+Behavior specifics:
+	•	Guests rule: must accommodate ≥ requested guests unless strictGuests=0.
+	•	Location mapping: Med, Bahamas, Caribbean.
+	•	Email adapter: SMTP if available, otherwise console log.
+	•	Background jobs: in-process, retry failed emails.
+
+Files to generate:
+	•	src/index.ts
+	•	src/db.ts
+	•	src/matcher.ts
+	•	src/quote.ts
+	•	src/email.ts
+	•	src/types.ts
+	•	src/seed.ts
+	•	package.json
+	•	.env.example
+	•	README.md
+
+Startup behavior:
+	•	Auto-run migrations if DB not exists.
+	•	Print curl examples for health, tenant creation, seeding yachts, searching, submitting a lead, calculating a quote.
+
+Acceptance checklist:
+	•	Health works.
+	•	Admin can create tenant and seed yachts.
+	•	Bahamas vs Med return different results.
+	•	Guests filter respected.
+	•	Lead creation returns candidates and queues email.
+	•	Quote calc returns breakdown.
+	•	Logging and validation works.
+
+Brand: Name the service internally “Yacht Automate – Brain”. No UI assets.
+
+Important: Do not generate any HTML pages. This is API only.
+
+Delivery: At the end, print a runbook in console with example curl commands.
+
+⸻

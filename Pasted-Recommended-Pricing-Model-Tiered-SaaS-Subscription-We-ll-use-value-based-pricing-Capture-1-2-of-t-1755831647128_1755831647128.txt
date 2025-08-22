@@ -1,0 +1,40 @@
+Recommended Pricing Model: Tiered SaaS Subscription
+We'll use value-based pricing: Capture 1–2% of the $150k–300k added revenue (e.g., $1.5k–6k/year per client), but keep it accessible to hit Year 1 $50k–250k revenue (10–50 clients). Monthly billing with annual discounts to encourage commitment. No transaction fees (differentiates us from Bokun/Let's Book), but add a one-time setup fee for custom fleet loading/integration.
+
+Starter Tier: $99/month ($89/month if annual, $1,068/year)
+
+For small agencies (1–10 yachts): Basic inquiry processing, auto-quotes (APA/VAT/gratuity), email responses with 3 recs, lead forwarding.
+Excludes: Advanced analytics, monthly reports, custom branding beyond basics, multilingual (add English/Spanish later as upsell).
+Why realistic: Matches Boatargo ($99/month base) and Bokun ($49–$199 tiers) for entry automation; low barrier for testing.
+
+
+Pro Tier: $299/month ($269/month if annual, $3,228/year)
+
+For mid-size brokers (10–50 yachts): Full features—24/7 concierge AI, itinerary handling, extras/delivery calcs, branded proposals with photos/specs, CRM webhooks, business intel (lead tracking, trends, forecasts, reports).
+Includes: Everything in Starter + revenue insights, scalability for 10x inquiries.
+Why realistic: Aligns with Aquator Advanced/Pro ($230–460/month for similar management/analytics) and YachtSys Advanced (110–190€ ~$120–210); captures our AI edge without overpricing.
+
+
+Enterprise Tier: $599/month ($539/month if annual, $6,468/year) or Custom Quote
+
+For large charters (50+ yachts): All Pro features + priority support, custom integrations (e.g., MYBA/CYBA contract templates), dedicated account manager, advanced multi-tenant isolation.
+Custom add-ons: $50–100/month per extra (e.g., API access for their systems).
+Why realistic: Higher-end like Latitude365 ($150+/user for large yachts) or NautifyCRM (usage-based custom); justifies premium for high-value clients with $300k+ ROI.
+
+
+
+Additional Fees
+
+One-Time Setup: $997 (waivable for annual signups)
+
+Covers fleet config, website/email integration, branding setup. Comparables like Nautify include free migration, but we charge for luxury customization (e.g., Aquator has custom dev add-ons).
+
+
+No hidden costs: Unlimited leads/inquiries, free updates, support. Overage if extreme (e.g., 1,000+ yachts: custom).
+
+Why This Pricing?
+
+Market Fit: Below general CRM (HubSpot $800+/month) but above basic boat software ($25–140); our AI/automation warrants 2x premium over YachtSys Basic.
+Revenue Projection: At $99–599/client, 20 clients = $24k–144k/year; mix tiers to average $250/month = $60k/year from 20. Scales to multi-million long-term.
+Competitive Edge: Free 14-day trial (like Boatargo's 30-day); emphasize ROI calculator on site showing 2–4 week payback.
+Missing Tweaks: If adding voice mode or Grok 4 API, upsell as $50/month premium feature.

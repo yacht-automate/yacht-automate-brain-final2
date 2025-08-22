@@ -1,0 +1,107 @@
+You reached the start of the range → Aug 22, 2025, 4:51 PM
+
+npm error
+
+npm error Did you mean one of these?
+
+npm error   npm star # Mark your favorite packages
+
+npm error   npm stars # View packages marked as favorites
+
+npm error
+
+npm error To see a list of scripts, run:
+
+npm error   npm run
+
+npm error A complete log of this run can be found in: /root/.npm/_logs/2025-08-22T22_53_56_316Z-debug-0.log
+
+npm error Missing script: "start"
+
+npm error
+
+npm error Did you mean one of these?
+
+npm error   npm star # Mark your favorite packages
+
+npm error   npm stars # View packages marked as favorites
+
+npm error
+
+npm error To see a list of scripts, run:
+
+npm error   npm run
+
+npm error A complete log of this run can be found in: /root/.npm/_logs/2025-08-22T22_53_57_025Z-debug-0.log
+
+npm error Missing script: "start"
+
+npm error
+
+npm error Did you mean one of these?
+
+npm error   npm star # Mark your favorite packages
+
+npm error   npm stars # View packages marked as favorites
+
+npm error
+
+npm error To see a list of scripts, run:
+
+npm error   npm run
+
+npm error A complete log of this run can be found in: /root/.npm/_logs/2025-08-22T22_53_57_739Z-debug-0.log
+
+npm error Missing script: "start"
+
+npm error
+
+npm error Did you mean one of these?
+
+npm error   npm star # Mark your favorite packages
+
+npm error   npm stars # View packages marked as favorites
+
+npm error
+
+npm error To see a list of scripts, run:
+
+npm error   npm run
+
+npm error A complete log of this run can be found in: /root/.npm/_logs/2025-08-22T22_53_58_437Z-debug-0.log
+
+npm error Missing script: "start"
+
+npm error
+
+npm error Did you mean one of these?
+
+npm error   npm star # Mark your favorite packages
+
+npm error   npm stars # View packages marked as favorites
+
+npm error
+
+npm error To see a list of scripts, run:
+
+npm error   npm run
+
+npm error A complete log of this run can be found in: /root/.npm/_logs/2025-08-22T22_53_59_144Z-debug-0.log
+
+npm error Missing script: "start"
+
+npm error
+
+npm error Did you mean one of these?
+
+npm error   npm star # Mark your favorite packages
+
+npm error   npm stars # View packages marked as favorites
+
+npm error
+
+npm error To see a list of scripts, run:
+
+npm error   npm run
+
+npm error A complete log of this run can be found in: /root/.npm/_logs/2025-08-22T22_53_59_856Z-debug-0.log

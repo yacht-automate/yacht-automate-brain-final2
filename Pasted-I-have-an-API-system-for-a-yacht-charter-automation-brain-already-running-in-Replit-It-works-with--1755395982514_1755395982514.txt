@@ -1,0 +1,69 @@
+I have an API system for a yacht charter automation brain already running in Replit. 
+It works with tenants, demo yachts, lead capture, and quote calculation. 
+Now I need to take it from "demo-ready" to "sell-ready."
+
+Do ALL of the following steps for me, one by one, explaining clearly as you go, and 
+showing me the exact code, file paths, or Replit UI clicks I need. 
+Don’t skip anything or assume I know — I want everything in one flow.
+
+### 1. Security
+- Rotate the default ADMIN_KEY to a long random value stored in Replit Secrets, not code.
+- Confirm all admin routes require this key.
+- Add simple rate-limiting to prevent spam (per-IP limit).
+- Lock down CORS to my domain (e.g. yachtautomate.com).
+
+### 2. SMTP Email
+- Help me connect SMTP using a real provider (Resend, SendGrid, or Gmail SMTP for testing).
+- Update .env with `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `FROM_NAME`, `FROM_EMAIL`.
+- Show me how to send a test inquiry and confirm it arrives in my inbox.
+- Add SPF/DKIM/DMARC instructions so emails don’t land in spam.
+
+### 3. Demo Data Purge
+- Ensure demo yacht seeding only happens in the “demo” tenant.
+- Disable auto-seeding of demo yachts in production.
+- Show me how to seed real client yachts from CSV or JSON.
+
+### 4. Automation Workflow
+- Ensure new leads automatically:
+   1) Save to database
+   2) Trigger yacht matching
+   3) Calculate indicative quote
+   4) Email results to prospect + CC charter company
+- Show me how to test this workflow end-to-end.
+
+### 5. Deploy Always-On
+- Configure Replit Deploys so the API runs 24/7 at a stable URL.
+- Show me where to copy the public URL that I give to clients.
+- Confirm endpoints respond from that public URL (not localhost).
+
+### 6. Monitoring & Logs
+- Enable error logging and simple alerts (email/Discord) when the server crashes.
+- Show me how to tail logs in Replit.
+
+### 7. Backups
+- Create a daily SQLite export routine (or advise migrating to a hosted DB).
+- Store backups in Replit storage or export them.
+
+### 8. Onboarding New Clients
+- Give me a repeatable process:
+   - Create a new tenant
+   - Upload their yacht list
+   - Configure SMTP for their domain
+   - Send test lead
+   - Hand over API URL + simple integration guide
+
+### 9. Legal Pages
+- Generate a minimal Privacy Policy and Terms of Service file 
+(plain text or HTML) that I can host from the API root (`/privacy`, `/terms`).
+
+### 10. Final Checklist
+- Confirm all 10 items (above) are “YES” and I am genuinely sell-ready.
+
+Output should include:
+- File changes (with code snippets)
+- Replit UI steps (Secrets, Deploys, Logs)
+- Example curl commands to verify each step
+- Example email received in inbox
+- Final checklist marked ✅ or ❌
+
+Do not stop early. Walk me through all 10 steps until everything is complete.

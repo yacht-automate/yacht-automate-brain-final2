@@ -1,0 +1,46 @@
+You are updating my existing Yacht Automate Brain (Fastify/TypeScript) with no UI. Keep all endpoints and behavior, but add production hardening and missing features.
+
+Do NOT rebuild from scratch.
+
+Add/confirm:
+	1.	Security & Limits
+	•	Enforce ALLOWED_DOMAIN CORS everywhere; reject others.
+	•	Add simple rate limiting: 60 req/min per IP (env tunable).
+	•	Add schema validation on all endpoints (yachts search, lead, quote calc) with precise error bodies.
+	•	Implement Idempotency-Key header for POST /lead: if same key within 24h per tenant, return the same lead result (no duplicate insert).
+	•	Add audit log table (SQLite) and log admin actions (create tenant, seed yachts).
+	•	Mask PII in logs (emails/phones -> hashed or partially redacted).
+	•	Prefix all routes with /v1 and keep /health as is. Provide redirects / -> 400 with a short JSON help.
+	2.	Reliability & Observability
+	•	Add /ready (checks DB readable and time since last event) and /live (always 200).
+	•	Structured logs (JSON) with reqId, tenantId, route, latencyMs, status.
+	•	Metrics counters (in‑memory): leads_total, emails_total, quotes_total; expose at /metrics (simple text format).
+	•	Outbound email/webhook retry with exponential backoff (max 5 tries) and store failures to a dead_letter table with reason and payload.
+	3.	Multitenancy & Data
+	•	Assert X-Tenant-Id on all non‑admin routes; 401 if missing/unknown.
+	•	Add pagination to /v1/yachts (limit default 20, max 50; offset). Return {items,total,limit,offset}.
+	•	Add migrations scaffolding (a tiny migration runner or version table) so we can upgrade schema safely.
+	•	Add dataRetentionDays (env, default 365) and a daily sweep to prune old raw email ingests & dead letters.
+	4.	Search v2 (confirm behavior)
+	•	/v1/yachts accepts area, q, type, guests, strictGuests.
+	•	strictGuests=true ⇒ include yachts with y.guests >= guests AND (y.guests - guests) <= 2.
+	•	Case‑insensitive token matching for q across name/builder/type/areas.
+	•	Always paginate.
+	5.	Pricing v2 (confirm behavior)
+	•	/v1/quote/calc supports: yachtId, weeks (default 1), apaPct, vatPct, gratuityPct (default 0), deliveryFee (default 0), extras:[{label,amount}].
+	•	Use base = weekly_rate_min * weeks.
+	•	apaAmount = base * (apaPct/100); vatAmount = (base + apaAmount) * (vatPct/100); gratuityAmount = base * (gratuityPct/100); total = base + apaAmount + vatAmount + gratuityAmount + deliveryFee + extrasTotal.
+	•	Response returns currency,weeks,base,apaPct,apaAmount,vatPct,vatAmount,gratuityPct,gratuityAmount,deliveryFee,extrasTotal,total,breakdown[] with the exact row order: Base, APA, VAT, Gratuity, Delivery fee, Extras…, Total.
+	6.	Email & Webhooks
+	•	Update the proposal email HTML to conditionally include Gratuity & Delivery Fee rows and a bold Total (est.).
+	•	Add tenant config fields for proposalCc and webhookUrl (optional). If set, POST a compact JSON payload on /lead creation (leadId, name, email, partySize, location, createdAt) to the webhook URL with HMAC signature header X-YA-Signature.
+	•	If SMTP not configured, log the email and mark as queued=false in a mail_log table.
+	7.	Docs & Tests
+	•	Add /v1 root that returns a JSON with available endpoints and required headers.
+	•	Create docs/tests.md with curl examples for: health, readiness, seed, search (strictGuests true/false), quote calc (with gratuity/delivery/extras), lead + webhook/email result.
+	8.	Deliverables
+	•	Show only diffs or added code blocks per file you touch (no full file dumps).
+	•	List all new ENV keys and defaults.
+	•	Run the server and paste sample JSON outputs proving acceptance tests.
+
+Keep everything backend‑only (no UI). Maintain backward compatibility for existing clients. Do not leak secrets or PII in logs.

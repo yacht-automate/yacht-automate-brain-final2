@@ -1,0 +1,11 @@
+[variables]
+NODE_VERSION = "20.11.1"
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "python3"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[start]
+cmd = "npx ts-node src/index.ts"
